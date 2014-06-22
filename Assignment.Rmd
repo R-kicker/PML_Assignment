@@ -1,0 +1,155 @@
+---
+title: "Practical Machine Learning assignment"
+author: "Igor Magdeyev"
+date: "Friday, June 20, 2014"
+output: html_document
+---
+
+### Step 1: data cleansing
+
+The training and test data read from CSV-files into data frames. As one can see
+there is sparse initial and test data: some variables do not contain any values,
+so zero complete cases found in the initial raw dataset.
+```{r echo=FALSE}
+# Step1a: get data
+require("caret")
+#require("corrplot")
+
+datadir <- "~/MyGitHub/PML/data/"
+traindf <- read.csv(paste(datadir,"pml-training.csv",sep=""),
+                    na.strings=c("NA","#DIV/0!"),stringsAsFactors=F)
+traindf[["classe"]] <- as.factor(traindf[["classe"]])
+newdf <- read.csv(paste(datadir,"pml-testing.csv",sep=""),
+                  na.strings=c("NA","#DIV/0!"),stringsAsFactors=F)
+list(sum(complete.cases(traindf)),
+     sum(complete.cases(newdf)))
+```
+Filter out 'NA' values by the given below code. One can see there are two classes
+of variables either complete or with high fraction of 'NA' values:
+```{r}
+# Step1b: calculate NAs
+NAcount <- t(apply(X=traindf,MARGIN=2,FUN=function(x) sum(is.na(x))))
+NAnewdf <- t(apply(X=newdf,MARGIN=2,FUN=function(x) sum(is.na(x))))
+list(levels(as.factor(NAcount)),levels(as.factor(NAnewdf)))
+```
+Thus two alternative model fit strategies can be applied:
+
+ - use minimal variable set with complete data;
+ 
+ - use as much variables as possible with removed incomplete cases.
+ 
+No imputation techniques intended to implement in this study.
+
+```{r}
+# Step1c: make different training data
+elim <- grep(paste("^",length(newdf[,1]),sep=""),NAnewdf)
+newdf1 <- newdf[,-elim]
+traindf1 <- traindf[,-elim]
+if (any(t(apply(X=traindf1,MARGIN=2,FUN=function(x) sum(is.na(x)))))!=0)
+  (warning("Some predictors inconsistent!"))
+
+# Get complete variables only - maximize NC cases
+NCindex <- intersect(grep("dumbbell|arm|belt|classe",names(traindf1)),
+                     grep("^0",NAcount))
+NCtraindf <- traindf1[,NCindex]
+NCnewdf <- newdf1[,NCindex]
+# Get as much as possible variables - maximize NP predictors
+NPindex <- setdiff(grep("dumbbell|arm|belt|classe",names(traindf1)),
+                   grep(paste("^",length(traindf1[,1]),sep=""),NAcount))
+NPtraindf <- traindf1[,NPindex]
+NPtraindf <- NPtraindf[complete.cases(NPtraindf),]
+NPnewdf <- newdf1[,NPindex][,-which(names(newdf1)=="problem_id")]
+```
+Another outlook of the data structure can be done via 'names(traindf)' function.
+Variable classification by gauge location as follows: "dumbbell", "forearm",
+"arm" and "belt". Thus, reducing the dimensionality problem (like PCA method)
+can be "supervised" in this artificial manner. Although the structured approach is more transparent, for this moment it is not intended to be applied because the test dataset is quite incomplete in terms of predictors.
+
+### Step 2: dimensionality reduction
+
+Pre-processing of "max cases" dataset with PCA (Fig.1) with variable threshold parameter gives no evidence for reduction of predictors: decreasing number of predictors yields the decreased proportion of explained variability.
+Thus, the model fit will be done *as is* with 17 predictor variables.
+
+```{r echo=FALSE}
+# Setup data frames - max NC cases
+xNC <- NCtraindf[,names(NCtraindf)!="classe"]
+yNC <- NCtraindf[["classe"]]
+xnewNC <- NCnewdf[,names(NCnewdf)!="problem_id"]
+# Setup data frames - max NP predictors
+xNP <- NPtraindf[,names(NPtraindf)!="classe"]
+yNP <- NPtraindf[["classe"]]
+xnewNP <- NPnewdf[,names(NPnewdf)!="problem_id"]
+
+thr <- c(0.70,0.75,0.80,0.85,0.90,0.95,0.99,0.9999)
+oldpar <- par(mfrow=c(1,2))
+plot(thr,sapply(X=thr,FUN=function(x)
+  preProcess(xNC,method="pca",thresh=x)$numComp),
+     main="Fig. 1: PCA, N=17 predictors",type="b",xlab="% of var",ylab="Ncomp")
+plot(thr,sapply(X=thr,FUN=function(x)
+  preProcess(xNP,method="pca",thresh=x)$numComp),
+     main="Fig. 2: PCA, N=51 predictor",type="b",xlab="% of var",ylab="Ncomp")
+par(oldpar)
+```
+Application of PCA on the "max predictors" dataset (Fig.2) may help significantly: 95% of variability may be preserved with almost half size of dimensions. Thus, optimal threshold for PCA pre-processing may be kept default - it is 0.95.
+
+### Step 3: model fit
+
+Two alternative approaches evaluated:
+
+ - attempt "as is" on the small N predictors, large M cases;
+ 
+ - pre-preocessing on the large N predictors, small M cases.
+
+Attempt on 17 predictors and 19622 cases "as is".
+*NOTE: Since the code take too long to run it has been commented out*.
+```{r}
+# set.seed(13333)
+# Perform model fit with methods: LDA, random forest, SVM and KNN
+# # With default control method - bootstrap
+# NCfitLDA <- train(xNC,yNC,method="lda",preProcess = c("center", "scale"))
+# NCfitRF <- train(xNC,yNC,method="rf",preProcess = c("center", "scale"))
+# NCfitSVM <- svm(xNC,yNC,kernel="radial")
+# NCfitKNN <- train(xNC,yNC,method="knn",preProcess = c("center", "scale"))
+# Make predictions
+# NCpredLDA <- predict(object=NCfitLDA,newdata=xnewNC)
+# NCpredRF <- predict(object=NCfitRF,newdata=xnewNC)
+# NCpredSVM <- predict(object=NCfitSVM,newdata=xnewNC)
+# Save result
+# NCresult <- data.frame(LDA=NCpredLDA,RF=NCpredRF,SVM=NCpredSVM,KNN=NCpredKNN)
+# write.csv(NCresult,file="~/NCresult.csv")
+```
+
+Perform the same task on the dataset with 51 predictor.
+Pre-processing with PCA is used to reduce number of predictors.
+```{r}
+# Perform model fit with methods: LDA, random forest, SVM and KNN
+# NPfitLDA <- train(xNP,yNP,method="lda",preProcess = "pca",thresh=0.95)
+# NPfitKNN <- train(xNP,yNP,method="knn",preProcess = "pca",thresh=0.95)
+# NPfitRF <- train(xNP,yNP,method="rf",preProcess = "pca",thresh=0.95)
+# NPfitSVM <- train(xNP,yNP,method="svmRadial",preProcess = "pca",thresh=0.95)
+# Make predictions
+# NPpredLDA <- predict(object=NPfitLDA,newdata=xnewNP)
+# NPpredKNN <- predict(object=NPfitKNN,newdata=xnewNP)
+# NPpredRF <- predict(object=NPfitRF,newdata=xnewNP)
+# NPpredSVM <- predict(object=NPfitSVM,newdata=xnewNP)
+# Save result
+# NPresult <- data.frame(LDA=NPpredLDA,RF=NPpredRF,SVM=NPpredSVM,KNN=NPpredKNN)
+# write.csv(NPresult,file="~/NPresult.csv")
+```
+
+### Step 4: collect the result
+After all the models have been fitted and prediction made the final result is obtained by the major vote principle: take the answer according to the most frequent provided by various models. The following code illustrates that:
+```{r}
+# Load previously stored predctions
+NCresult <- read.csv(file="~/MyGitHub/PML/NCresult.csv",row.names=1)
+NPresult <- read.csv(file="~/MyGitHub/PML/NPresult.csv",row.names=1)
+resfull <- data.frame(NCresult,NPresult)
+names(resfull) <- c("NC_LDA","NC_RF","NC_SVM","NC_KNN","NP_LDA","NP_KNN")
+finalvote <- rep ("A",20)
+for (i in 1:20) {
+  finalvote[i] <- names(which.max(table(t(resfull[i,]))))
+}
+print(t(resfull))
+print(finalvote)
+```
+In most cases the methods showed consistent result. Although, as it can be seen from tables above there are several confusing cases: #3, 6, 8 and 19. The KNN method surprisingly gave the right answer for all of them! This is done without deep analysis of data structure. But still - the simple classification method must be taken into account as well as others sophisticated.
